@@ -1,12 +1,16 @@
 //
 //  HYFileDownloadQueue.h
-//  LXNetworkingDemo
+//  HYFileDownloader
 //
-//  Created by luculent on 16/4/27.
-//  Copyright © 2016年 liuxin. All rights reserved.
+//  Created by yanghaha on 16/7/17.
+//  Copyright © 2016年 hillyoung. All rights reserved.
 //
 
 #import <Foundation/Foundation.h>
+
+@class HYFileDownloader;
+
+#pragma mark - HYFileDownloadTask -----------------------------
 
 /**
  *  单个文件下载任务
@@ -75,6 +79,17 @@
 
 @end
 
+#pragma mark - HYFileNoMoveDownloadTask -----------------------------
+
+//下载完成后不需要移动的下载任务
+@interface HYFileNoMoveDownloadTask : HYFileDownloadTask
+
+- (BOOL)isCacheInDownloader:(HYFileDownloader *)downloader ;
+
+@end
+
+#pragma mark - HYFileDownloader -----------------------------
+
 /**
  *  文件下载完成,通知名
  */
@@ -101,7 +116,8 @@ static NSString *const HYFileDownloadTaskDidFinished = @"HYFileDownloadTaskDidFi
 @property (readonly, strong, nonatomic) NSMutableArray<HYFileDownloadTask *> *downloadedTasks;
 
 /**
- *  缓存文件的后缀名
+ *  缓存文件的后缀名；
+ *  无后缀名，则表示直接写入文件中，下载完成后不需要重命名或者移动文件
  */
 @property (copy, nonatomic) NSString *suffix;
 
@@ -133,21 +149,21 @@ static NSString *const HYFileDownloadTaskDidFinished = @"HYFileDownloadTaskDidFi
 - (void)synchronize ;
 
 /**
- *  根据目标文件的相对路径，返回对应的缓存文件路径(绝对路径)
+ *  根据下载任务，返回对应的缓存文件路径(绝对路径)
  *
- *  @param filePath 目标文件的相对路径
+ *  @param task 指定的下载任务
  *
  *  @return 返回对应的缓存文件路径(绝对路径)
  */
-+ (NSString *)tempPathForFilePath:(NSString *)filePath ;
++ (NSString *)tempPathForFilePath:(HYFileDownloadTask *)task ;
 
 /**
- *  根据目标文件的相对路径，解析出对应的文件绝对路径
+ *  根据下载任务，解析出对应的文件绝对路径
  *
- *  @param filePath 目标文件的相对路径
+ *  @param task 指定的下载任务
  *
  *  @return 解析出对应的文件路径(相对路径)
  */
-+ (NSString *)absolutePathForFilePath:(NSString *)filePath ;
++ (NSString *)absolutePathForFilePath:(HYFileDownloadTask *)task ;
 
 @end

@@ -1,9 +1,9 @@
 //
 //  HYFileDownloader.m
-//  LXNetworkingDemo
+//  HYFileDownloader
 //
-//  Created by luculent on 16/4/27.
-//  Copyright © 2016年 liuxin. All rights reserved.
+//  Created by yanghaha on 16/7/17.
+//  Copyright © 2016年 hillyoung. All rights reserved.
 //
 
 #import "HYFileDownloader.h"
@@ -54,7 +54,7 @@ static NSString const *key_downloaded = @"key_downloaded";
     _currentLength = 0;
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
-    NSString *path = [HYFileDownloader tempPathForFilePath:self.filePath];
+    NSString *path = [HYFileDownloader tempPathForFilePath:self];
     if ([fileManager fileExistsAtPath:path]) {
         NSError *error = nil;
         NSDictionary *dict = [fileManager attributesOfItemAtPath:path error:&error];
@@ -208,6 +208,26 @@ static NSString const *key_downloaded = @"key_downloaded";
 
 @end
 
+#pragma mark - HYFileNoMoveDownloadTask -----------------------------
+
+@implementation HYFileNoMoveDownloadTask
+
+- (BOOL)isCacheInDownloader:(HYFileDownloader *)downloader {
+    __block BOOL isCache = NO;
+    [downloader.downloadedTasks enumerateObjectsUsingBlock:^(HYFileDownloadTask * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+        if ([obj.urlStr isEqualToString:self.urlStr]) {
+            isCache = YES;
+            *stop = YES;
+        }
+    }];
+
+    return isCache;
+}
+
+@end
+
+#pragma mark - HYFileDownloader -----------------------------
+
 @implementation HYFileDownloader
 
 #pragma mark - LifeCycle
@@ -215,6 +235,7 @@ static NSString const *key_downloaded = @"key_downloaded";
 - (instancetype)init {
     if (self = [super init]) {
         self.maxDownloadCount = 10;
+        [self loadAllItems];
     }
 
     return self;
@@ -256,7 +277,9 @@ static NSString const *key_downloaded = @"key_downloaded";
         return;
     }
 
-    NSString *tempPath = [HYFileDownloader tempPathForFilePath:task.filePath];
+    [self renameTask:task];
+
+    NSString *tempPath = [HYFileDownloader tempPathForFilePath:task];
 
     NSURL *url = [NSURL URLWithString:task.urlStr];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
@@ -297,9 +320,9 @@ static NSString const *key_downloaded = @"key_downloaded";
     [task cancel];
     [self.downloadingTasks removeObject:task];
 
-    if ([[NSFileManager defaultManager] fileExistsAtPath:[HYFileDownloader tempPathForFilePath:task.filePath]]) {
+    if ([[NSFileManager defaultManager] fileExistsAtPath:[HYFileDownloader tempPathForFilePath:task]]) {
         NSError *error = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:[HYFileDownloader tempPathForFilePath:task.filePath] error:&error];
+        [[NSFileManager defaultManager] removeItemAtPath:[HYFileDownloader tempPathForFilePath:task] error:&error];
     }
 
 }
@@ -367,17 +390,21 @@ static NSString const *key_downloaded = @"key_downloaded";
 
 #pragma mark - Private
 
-+ (NSString *)tempPathForFilePath:(NSString *)filePath {
++ (NSString *)tempPathForFilePath:(HYFileDownloadTask *)task {
+
+    if ([task isKindOfClass:[HYFileNoMoveDownloadTask class]]) {
+        return [self absolutePathForFilePath:task];
+    }
 
     NSString *tempPath = [HYFileDownloader defaultDownloader].cachePath;
-    tempPath = [tempPath stringByAppendingPathComponent:filePath];
+    tempPath = [tempPath stringByAppendingPathComponent:task.filePath];
 
     return [tempPath stringByAppendingString:[HYFileDownloader defaultDownloader].suffix];
 }
 
-+ (NSString *)absolutePathForFilePath:(NSString *)filePath {
++ (NSString *)absolutePathForFilePath:(HYFileDownloadTask *)task {
     NSString *path = [HYFileDownloader defaultDownloader].cachePath;
-    return [path stringByAppendingPathComponent:filePath];
+    return [path stringByAppendingPathComponent:task.filePath];
 }
 
 - (void)synchronize {
@@ -390,6 +417,43 @@ static NSString const *key_downloaded = @"key_downloaded";
     }
 }
 
+/**
+ *  根据任务，是否重复下载确定是否需要重命名任务名
+ */
+- (void)renameTask:(HYFileDownloadTask *)task {
+
+    NSMutableArray *allTaskes = [self.downloadingTasks mutableCopy];
+
+    if (!allTaskes) {
+        allTaskes = [NSMutableArray array];
+    }
+
+    [allTaskes addObjectsFromArray:self.downloadedTasks];
+
+
+
+    [allTaskes enumerateObjectsUsingBlock:^(id  _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+
+        if ([[(HYFileDownloadTask *)obj urlStr] isEqualToString:task.urlStr]) {
+
+            NSDate *date = [NSDate date];
+            NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+            dateFormatter.dateFormat = @"yyyyMMddHHmmss";
+            NSString *suffix = [dateFormatter stringFromDate:date];
+
+            task.title = [task.title stringByAppendingString:suffix];
+
+            if ([task.filePath rangeOfString:@"."].length) {
+                task.filePath = [task.filePath stringByReplacingOccurrencesOfString:@"." withString:[suffix stringByAppendingString:@"."]];
+            } else {
+                task.filePath = [task.filePath stringByAppendingString:suffix];
+            }
+
+            *stop = YES;
+        }
+
+    }];
+}
 
 #pragma mark - NSURLConnectionDataDelegate
 
@@ -512,7 +576,7 @@ static NSString const *key_downloaded = @"key_downloaded";
     }
 
     //利用NSOutputStream往filePath文件中写数据，若append参数为yes，则会写到文件尾部
-    task.stream = [[NSOutputStream alloc] initToFileAtPath:[HYFileDownloader tempPathForFilePath:task.filePath ] append:YES];
+    task.stream = [[NSOutputStream alloc] initToFileAtPath:[HYFileDownloader tempPathForFilePath:task ] append:YES];
     [task.stream open];
     completionHandler(NSURLSessionResponseAllow);
 
@@ -531,7 +595,10 @@ static NSString const *key_downloaded = @"key_downloaded";
 
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        item.progressBlock(item, progress);
+
+        if (item.progressBlock) {
+            item.progressBlock(item, progress);
+        }
     });
 
 
@@ -554,21 +621,28 @@ static NSString const *key_downloaded = @"key_downloaded";
             return;
         }
 
-        NSError *fileError = nil;
-        //判断文件是否存在，如存在先删除，在重命名
-        if ([[NSFileManager defaultManager] fileExistsAtPath:[HYFileDownloader absolutePathForFilePath:downloadtask.filePath]]) {
 
-            [[NSFileManager defaultManager] removeItemAtPath:[HYFileDownloader absolutePathForFilePath:downloadtask.filePath] error:&fileError];
+        //根据缓存文件是否有后缀名，来判断是否需要重命名
+        if ([downloadtask isKindOfClass:[HYFileNoMoveDownloadTask class]]) {
+
+        } else {
+            NSError *fileError = nil;
+            //判断文件是否存在，如存在先删除，在重命名
+            if ([[NSFileManager defaultManager] fileExistsAtPath:[HYFileDownloader absolutePathForFilePath:downloadtask]]) {
+
+                [[NSFileManager defaultManager] removeItemAtPath:[HYFileDownloader absolutePathForFilePath:downloadtask] error:&fileError];
+                if (fileError) {
+                    NSLog(@"%@", fileError);
+                }
+            }
+
+            //通过move的方式来重命名
+            [[NSFileManager defaultManager] moveItemAtPath:[HYFileDownloader tempPathForFilePath:downloadtask] toPath:[HYFileDownloader absolutePathForFilePath:downloadtask] error:&fileError];
             if (fileError) {
                 NSLog(@"%@", fileError);
             }
         }
 
-        //通过move的方式来重命名
-        [[NSFileManager defaultManager] moveItemAtPath:[HYFileDownloader tempPathForFilePath:downloadtask.filePath] toPath:[HYFileDownloader absolutePathForFilePath:downloadtask.filePath] error:&fileError];
-        if (fileError) {
-            NSLog(@"%@", fileError);
-        }
 
         [self.identifierTaskDic removeObjectForKey:@(task.taskIdentifier).stringValue];
 
